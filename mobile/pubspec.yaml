@@ -1,0 +1,52 @@
+name: jbnet
+description: JbNet — social job referral network.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.7.0
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+
+  # Navigation
+  go_router: ^14.8.1
+
+  # State management
+  flutter_riverpod: ^2.6.1
+  riverpod_annotation: ^2.6.1
+
+  # HTTP
+  dio: ^5.8.0+1
+
+  # Auth (AWS Cognito SRP)
+  amazon_cognito_identity_dart_2: ^3.0.0
+
+  # Secure storage (tokens)
+  flutter_secure_storage: ^9.2.4
+
+  # File picker (resume upload)
+  file_picker: ^8.3.7
+
+  # Misc
+  intl: ^0.20.2
+  equatable: ^2.0.7
+  freezed_annotation: ^2.4.4
+  json_annotation: ^4.9.0
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+  build_runner: ^2.4.15
+  riverpod_generator: ^2.6.4
+  freezed: ^2.5.7
+  json_serializable: ^6.9.5
+  mockito: ^5.4.5
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/images/
