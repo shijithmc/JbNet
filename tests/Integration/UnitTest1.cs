@@ -1,10 +1,2 @@
-﻿namespace JbNet.Tests.Integration;
-
-public class UnitTest1
-{
-    [Fact]
-    public void Test1()
-    {
-
-    }
-}
+// Placeholder replaced — see Repositories/ directory for integration tests.
+namespace JbNet.Tests.Integration;

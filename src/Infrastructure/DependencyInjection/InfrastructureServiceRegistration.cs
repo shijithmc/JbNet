@@ -1,6 +1,7 @@
 using Amazon.DynamoDBv2;
 using Amazon.EventBridge;
 using Amazon.S3;
+using Amazon.SimpleNotificationService;
 using JbNet.Application.Common;
 using JbNet.Domain.Repositories;
 using JbNet.Infrastructure.DynamoDB;
@@ -35,12 +36,14 @@ public static class InfrastructureServiceRegistration
 
         services.AddSingleton<IAmazonS3, AmazonS3Client>();
         services.AddSingleton<IAmazonEventBridge, AmazonEventBridgeClient>();
+        services.AddSingleton<IAmazonSimpleNotificationService, AmazonSimpleNotificationServiceClient>();
 
         // Repositories
         services.AddScoped<IUserRepository, DynamoUserRepository>();
         services.AddScoped<IConnectionRepository, DynamoConnectionRepository>();
         services.AddScoped<IJobPostingRepository, DynamoJobPostingRepository>();
         services.AddScoped<IReferralRequestRepository, DynamoReferralRequestRepository>();
+        services.AddScoped<IDeviceTokenRepository, DynamoDeviceTokenRepository>();
 
         // Services
         services.AddScoped<IResumeStorageService, S3ResumeStorageService>();

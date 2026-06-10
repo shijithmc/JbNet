@@ -1,3 +1,4 @@
+using JbNet.Application.Notifications.Commands.RegisterDeviceToken;
 using JbNet.Application.Users.Commands.SetResume;
 using JbNet.Application.Users.Commands.UpdateUserProfile;
 using JbNet.Application.Users.Queries.GetUserProfile;
@@ -47,6 +48,20 @@ public sealed class UsersController(ISender sender) : ControllerBase
         return Ok(result);
     }
 
+    /// <summary>
+    /// Registers or refreshes a device push-notification token.
+    /// Creates an SNS Platform Endpoint and persists the mapping so the notification Lambda
+    /// can target this device.
+    /// </summary>
+    [HttpPost("me/device-token")]
+    public async Task<IActionResult> RegisterDeviceToken([FromBody] RegisterDeviceTokenRequest request, CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        var endpointArn = await sender.Send(
+            new RegisterDeviceTokenCommand(userId, request.RawToken, request.Platform, request.SnsApplicationArn), ct);
+        return Ok(new { EndpointArn = endpointArn });
+    }
+
     private string GetCurrentUserId() =>
         User.FindFirst("sub")?.Value
         ?? throw new UnauthorizedAccessException("JWT sub claim missing.");
@@ -61,3 +76,8 @@ public sealed record UpdateProfileRequest(
 public sealed record SetResumeRequest(
     string FileName,
     long SizeBytes);
+
+public sealed record RegisterDeviceTokenRequest(
+    string RawToken,
+    string Platform,
+    string SnsApplicationArn);
