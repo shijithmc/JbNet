@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/auth_exception.dart';
 import '../../../core/auth_state.dart';
+import '../../../core/validators.dart';
 
 // FA-012: No `amazon_cognito_identity_dart_2` import — screens depend only
 // on the domain AuthException hierarchy, not on the Cognito infrastructure.
@@ -74,11 +75,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   keyboardType: TextInputType.emailAddress,
                   textInputAction: TextInputAction.next,
                   autocorrect: false,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Email is required.';
-                    if (!v.contains('@'))       return 'Enter a valid email address.';
-                    return null;
-                  },
+                  validator: emailValidator,
                 ),
                 const SizedBox(height: 16),
                 TextFormField(
@@ -87,8 +84,9 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   obscureText: true,
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _submit(),
-                  validator: (v) =>
-                      (v == null || v.length < 8) ? 'Min 8 characters.' : null,
+                  // Login: only check non-empty — server validates credentials.
+                  // Complexity check applies only at registration (register_screen.dart).
+                  validator: (v) => (v == null || v.isEmpty) ? 'Password is required.' : null,
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),

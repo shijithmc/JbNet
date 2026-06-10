@@ -3,7 +3,7 @@ import 'cognito_service.dart';
 
 /// Immutable snapshot of the current authentication state.
 ///
-/// [isRestoring] is true from construction until [AuthStateNotifier._restore]
+/// [isRestoring] is true from construction until [AuthStateNotifier.build]
 /// completes. Routers and UI should hold or show a splash while this is true
 /// to prevent a flash-of-login-screen on cold start. FA-005.
 class AuthState {
@@ -34,14 +34,19 @@ class AuthState {
 }
 
 /// Riverpod notifier that manages authentication state.
-/// Restores session from secure storage on construction.
-class AuthStateNotifier extends StateNotifier<AuthState> {
-  final CognitoService _cognito;
+/// FA-014: migrated from deprecated [StateNotifier] to [Notifier] (Riverpod 2.x).
+/// Dependencies are resolved via [ref.read] inside methods instead of
+/// constructor injection — compatible with [cognitoServiceProvider.overrideWith]
+/// in tests.
+class AuthStateNotifier extends Notifier<AuthState> {
+  CognitoService get _cognito => ref.read(cognitoServiceProvider);
 
-  /// Prefer injecting via [cognitoServiceProvider] rather than constructing
-  /// directly — supports test overrides. FA-009.
-  AuthStateNotifier(this._cognito) : super(const AuthState()) {
+  /// Synchronous initial state. Async session restore is kicked off
+  /// as a fire-and-forget immediately after returning. FA-005 + FA-013.
+  @override
+  AuthState build() {
     _restore();
+    return const AuthState(); // isRestoring: true until _restore() completes
   }
 
   /// Restores any previously saved Cognito session.
@@ -92,6 +97,6 @@ class AuthStateNotifier extends StateNotifier<AuthState> {
   }
 }
 
-final authStateProvider = StateNotifierProvider<AuthStateNotifier, AuthState>(
-  (ref) => AuthStateNotifier(ref.read(cognitoServiceProvider)),
+final authStateProvider = NotifierProvider<AuthStateNotifier, AuthState>(
+  AuthStateNotifier.new,
 );

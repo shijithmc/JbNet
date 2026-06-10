@@ -1,5 +1,6 @@
 using JbNet.Application.Connections.Commands.AcceptConnectionRequest;
 using JbNet.Application.Connections.Commands.SendConnectionRequest;
+using JbNet.Application.Connections.Queries.GetAcceptedConnections;
 using MediatR;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -11,6 +12,15 @@ namespace JbNet.Api.Controllers;
 [Authorize]
 public sealed class ConnectionsController(ISender sender) : ControllerBase
 {
+    /// <summary>Returns the authenticated user's accepted connections.</summary>
+    [HttpGet("me")]
+    public async Task<IActionResult> GetMyConnections(CancellationToken ct)
+    {
+        var userId = GetCurrentUserId();
+        var result = await sender.Send(new GetAcceptedConnectionsQuery(userId), ct);
+        return Ok(result);
+    }
+
     /// <summary>Send a connection request to another user.</summary>
     [HttpPost]
     public async Task<IActionResult> Send([FromBody] SendConnectionRequestBody request, CancellationToken ct)
