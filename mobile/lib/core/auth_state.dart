@@ -1,24 +1,35 @@
-import 'package:amazon_cognito_identity_dart_2/cognito.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'cognito_service.dart';
 
 /// Immutable snapshot of the current authentication state.
+///
+/// [isRestoring] is true from construction until [AuthStateNotifier._restore]
+/// completes. Routers and UI should hold or show a splash while this is true
+/// to prevent a flash-of-login-screen on cold start. FA-005.
 class AuthState {
+  final bool isRestoring;
   final bool isAuthenticated;
   final String? userId;
   final String? accessToken;
 
   const AuthState({
+    this.isRestoring = true, // hold until _restore() completes
     this.isAuthenticated = false,
     this.userId,
     this.accessToken,
   });
 
-  AuthState copyWith({bool? isAuthenticated, String? userId, String? accessToken}) =>
+  AuthState copyWith({
+    bool? isRestoring,
+    bool? isAuthenticated,
+    String? userId,
+    String? accessToken,
+  }) =>
       AuthState(
+        isRestoring:     isRestoring     ?? this.isRestoring,
         isAuthenticated: isAuthenticated ?? this.isAuthenticated,
-        userId: userId ?? this.userId,
-        accessToken: accessToken ?? this.accessToken,
+        userId:          userId          ?? this.userId,
+        accessToken:     accessToken     ?? this.accessToken,
       );
 }
 
@@ -27,45 +38,60 @@ class AuthState {
 class AuthStateNotifier extends StateNotifier<AuthState> {
   final CognitoService _cognito;
 
-  AuthStateNotifier([CognitoService? cognito])
-      : _cognito = cognito ?? CognitoService(),
-        super(const AuthState()) {
+  /// Prefer injecting via [cognitoServiceProvider] rather than constructing
+  /// directly — supports test overrides. FA-009.
+  AuthStateNotifier(this._cognito) : super(const AuthState()) {
     _restore();
   }
 
-  /// Restores any previously stored Cognito session.
+  /// Restores any previously saved Cognito session.
+  /// Handles JWT expiry check and silent refresh. FA-005 + FA-013.
   Future<void> _restore() async {
-    final token  = await _cognito.getAccessToken();
-    final userId = await _cognito.getUserId();
-    if (token != null && token.isNotEmpty && userId != null) {
-      state = AuthState(isAuthenticated: true, userId: userId, accessToken: token);
+    final result = await _cognito.tryRestoreSession();
+    if (result != null) {
+      state = AuthState(
+        isRestoring:     false,
+        isAuthenticated: true,
+        userId:          result.userId,
+        accessToken:     result.accessToken,
+      );
+    } else {
+      state = const AuthState(isRestoring: false);
     }
   }
 
-  /// Signs in via Cognito SRP. Throws [CognitoClientException] on failure.
+  /// Signs in via Cognito SRP. Throws an [AuthException] subclass on failure.
   Future<void> signIn(String email, String password) async {
     final userId = await _cognito.signIn(email, password);
     final token  = await _cognito.getAccessToken();
-    state = AuthState(isAuthenticated: true, userId: userId, accessToken: token);
+    state = AuthState(
+      isRestoring:     false,
+      isAuthenticated: true,
+      userId:          userId,
+      accessToken:     token,
+    );
   }
 
   /// Signs out, clears tokens, and resets state.
-  /// [email] is used for Cognito global sign-out; if omitted (e.g. on token
-  /// expiry from the API interceptor), local storage is still cleared.
   Future<void> signOut([String email = '']) async {
     await _cognito.signOut(email);
-    state = const AuthState();
+    state = const AuthState(isRestoring: false);
   }
 
-  /// For test overrides and post-confirm auto-sign-in flows.
-  void setAuthenticated({required String userId, required String accessToken}) {
-    state = state.copyWith(isAuthenticated: true, userId: userId, accessToken: accessToken);
+  /// Updates state after a transparent token refresh (called by the Dio
+  /// interceptor — does not trigger a full sign-in flow). FA-004.
+  void setAuthenticated({
+    required String userId,
+    required String accessToken,
+  }) {
+    state = state.copyWith(
+      isAuthenticated: true,
+      userId:          userId,
+      accessToken:     accessToken,
+    );
   }
 }
 
 final authStateProvider = StateNotifierProvider<AuthStateNotifier, AuthState>(
-  (ref) => AuthStateNotifier(),
+  (ref) => AuthStateNotifier(ref.read(cognitoServiceProvider)),
 );
-
-/// Typed Cognito exception — exposed so UI can format error messages.
-typedef CognitoError = CognitoClientException;

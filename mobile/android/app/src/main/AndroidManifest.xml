@@ -1,4 +1,8 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- FA-001: INTERNET permission required for network calls in release builds.
+         The debug overlay (debug/AndroidManifest.xml) also declares it, but the
+         main manifest is the only one merged into production APKs / AABs. -->
+    <uses-permission android:name="android.permission.INTERNET"/>
     <application
         android:label="jbnet"
         android:name="${applicationName}"
