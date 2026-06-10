@@ -1,0 +1,208 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: [master]
+
+env:
+  DOTNET_VERSION: "9.0.x"
+
+jobs:
+  # ── Backend: build, lint, unit tests ────────────────────────────────────────
+  backend:
+    name: Backend (.NET)
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore JbNet.slnx
+
+      - name: Build
+        run: dotnet build JbNet.slnx --no-restore -c Release
+
+      - name: Lint (dotnet format)
+        run: dotnet format JbNet.slnx --verify-no-changes --severity error
+
+      - name: Unit tests
+        run: >
+          dotnet test tests/Unit/JbNet.Tests.Unit.csproj
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=unit-results.trx"
+          --results-directory ./test-results/unit
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Unit Test Results
+          path: ./test-results/unit/*.trx
+          reporter: dotnet-trx
+
+  # ── Backend: integration tests (DynamoDB Local) ──────────────────────────────
+  integration:
+    name: Integration Tests (DynamoDB Local)
+    runs-on: ubuntu-latest
+    needs: backend
+
+    services:
+      dynamodb-local:
+        image: amazon/dynamodb-local:latest
+        ports:
+          - 8000:8000
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore JbNet.slnx
+
+      - name: Build
+        run: dotnet build JbNet.slnx --no-restore -c Release
+
+      - name: Integration tests
+        env:
+          DynamoDB__ServiceUrl: http://localhost:8000
+          DynamoDB__TableName: jbnet-table-test
+        run: >
+          dotnet test tests/Integration/JbNet.Tests.Integration.csproj
+          --no-build
+          --configuration Release
+          --logger "trx;LogFileName=integration-results.trx"
+          --results-directory ./test-results/integration
+
+      - name: Publish test results
+        if: always()
+        uses: dorny/test-reporter@v1
+        with:
+          name: Integration Test Results
+          path: ./test-results/integration/*.trx
+          reporter: dotnet-trx
+
+  # ── CDK synth (validates infra compiles and synthesises) ─────────────────────
+  cdk-synth:
+    name: CDK Synth
+    runs-on: ubuntu-latest
+    needs: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node (for CDK CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: CDK Synth
+        working-directory: infrastructure/cdk
+        env:
+          CDK_DEFAULT_ACCOUNT: "123456789012"
+          CDK_DEFAULT_REGION: ap-south-1
+        run: cdk synth --context stage=ci --quiet
+
+  # ── Flutter: analyze and test ────────────────────────────────────────────────
+  flutter:
+    name: Flutter Mobile
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: "3.32.x"
+          channel: stable
+
+      - name: Flutter pub get
+        working-directory: mobile
+        run: flutter pub get
+
+      - name: Flutter analyze
+        working-directory: mobile
+        run: flutter analyze --fatal-infos
+
+      - name: Flutter test
+        working-directory: mobile
+        run: flutter test --reporter=expanded
+
+  # ── Deploy to dev (master branch only) ──────────────────────────────────────
+  deploy-dev:
+    name: Deploy Dev
+    runs-on: ubuntu-latest
+    needs: [backend, integration, cdk-synth, flutter]
+    if: github.ref == 'refs/heads/master' && github.event_name == 'push'
+    environment: dev
+
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Configure AWS credentials (OIDC)
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ap-south-1
+
+      - name: Publish API Lambda
+        run: >
+          dotnet publish src/Api/JbNet.Api.csproj
+          -c Release
+          -r linux-x64
+          --self-contained false
+          -o src/Api/publish
+
+      - name: Publish Functions Lambda
+        run: >
+          dotnet publish src/Functions/JbNet.Functions.csproj
+          -c Release
+          -r linux-x64
+          --self-contained false
+          -o src/Functions/publish
+
+      - name: Setup Node (for CDK CLI)
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install CDK CLI
+        run: npm install -g aws-cdk
+
+      - name: CDK Deploy
+        working-directory: infrastructure/cdk
+        run: cdk deploy --context stage=dev --require-approval never --outputs-file cdk-outputs.json
+
+      - name: Smoke test (API health)
+        run: |
+          API_URL=$(cat infrastructure/cdk/cdk-outputs.json | jq -r '.["JbNet-dev"]["ApiLambdaArn"] // empty')
+          echo "Deploy complete. API Lambda ARN: $API_URL"
