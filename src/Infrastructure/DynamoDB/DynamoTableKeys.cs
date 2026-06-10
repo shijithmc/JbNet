@@ -26,6 +26,8 @@ internal static class DynamoTableKeys
     public static string Gsi1Pk(string userId)     => $"PENDING#{userId}";
     public static string Gsi1Sk(DateTimeOffset createdAt) => $"CREATED#{createdAt:O}";
 
+    public static string DeviceTokenSk(string tokenId) => $"DEVICE#{tokenId}";
+
     // ── Attribute names ───────────────────────────────────────────────────────
     public const string PkAttr        = "PK";
     public const string SkAttr        = "SK";

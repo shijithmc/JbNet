@@ -48,6 +48,7 @@ builder.Services
     });
 
 builder.Services.AddAuthorization();
+builder.Services.AddHealthChecks();
 builder.Services.AddAWSLambdaHosting(LambdaEventSource.HttpApi);
 
 var app = builder.Build();
@@ -61,6 +62,7 @@ if (app.Environment.IsDevelopment())
 app.UseMiddleware<ErrorHandlingMiddleware>();
 app.UseAuthentication();
 app.UseAuthorization();
+app.MapHealthChecks("/healthz");
 app.MapControllers();
 
 app.Run();

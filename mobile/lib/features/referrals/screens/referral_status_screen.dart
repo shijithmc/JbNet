@@ -1,14 +1,431 @@
+import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/api_client.dart';
 
-class ReferralStatusScreen extends StatelessWidget {
+// ── Provider ──────────────────────────────────────────────────────────────────
+
+// GET /referrals/{id} currently returns a placeholder { id } response.
+// The full status shape (status, jobTitle, companyName, hops, role) will be
+// populated once the backend query is implemented.
+final referralStatusProvider =
+    FutureProvider.family<Map<String, dynamic>, String>((ref, requestId) async {
+  final dio = ref.watch(apiClientProvider);
+  final response =
+      await dio.get<Map<String, dynamic>>('/referrals/$requestId');
+  return response.data!;
+});
+
+// ── Screen ────────────────────────────────────────────────────────────────────
+
+class ReferralStatusScreen extends ConsumerStatefulWidget {
   final String requestId;
   const ReferralStatusScreen({super.key, required this.requestId});
 
   @override
+  ConsumerState<ReferralStatusScreen> createState() =>
+      _ReferralStatusScreenState();
+}
+
+class _ReferralStatusScreenState
+    extends ConsumerState<ReferralStatusScreen> {
+  bool _actioning = false;
+
+  // ── Actions ─────────────────────────────────────────────────────────────────
+
+  Future<void> _forward() async {
+    final note = await _promptNote(
+      context,
+      title: 'Forward request',
+      hint: 'Optional note to the next person…',
+    );
+    if (note == null) return; // user cancelled
+    await _doAction(
+      () async {
+        final dio = ref.read(apiClientProvider);
+        await dio.post<dynamic>(
+          '/referrals/${widget.requestId}/forward',
+          data: {'note': note.isEmpty ? null : note},
+        );
+      },
+      successMessage: 'Request forwarded.',
+    );
+  }
+
+  Future<void> _accept() async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Accept referral request?',
+      body: 'You are committing to internally refer this candidate.',
+    );
+    if (!confirmed) return;
+    await _doAction(
+      () async {
+        final dio = ref.read(apiClientProvider);
+        await dio.post<dynamic>('/referrals/${widget.requestId}/accept');
+      },
+      successMessage: 'Request accepted.',
+    );
+  }
+
+  Future<void> _decline() async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Decline referral request?',
+      body:
+          'The job seeker will be notified that you cannot help with this request.',
+    );
+    if (!confirmed) return;
+    await _doAction(
+      () async {
+        final dio = ref.read(apiClientProvider);
+        await dio.post<dynamic>(
+          '/referrals/${widget.requestId}/decline',
+          data: {'reason': null},
+        );
+      },
+      successMessage: 'Request declined.',
+    );
+  }
+
+  Future<void> _withdraw() async {
+    final confirmed = await _confirm(
+      context,
+      title: 'Withdraw request?',
+      body: 'This cancels your referral request. This cannot be undone.',
+    );
+    if (!confirmed) return;
+    await _doAction(
+      () async {
+        final dio = ref.read(apiClientProvider);
+        await dio.delete<dynamic>('/referrals/${widget.requestId}');
+      },
+      successMessage: 'Request withdrawn.',
+    );
+    if (mounted) context.go('/jobs');
+  }
+
+  Future<void> _doAction(
+    Future<void> Function() fn, {
+    required String successMessage,
+  }) async {
+    setState(() => _actioning = true);
+    try {
+      await fn();
+      if (mounted) {
+        ref.invalidate(referralStatusProvider(widget.requestId));
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(successMessage)));
+      }
+    } on DioException catch (e) {
+      if (mounted) {
+        final msg = e.response?.statusCode == 403
+            ? 'Not authorised for this action.'
+            : 'Action failed. Please try again.';
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text(msg)));
+      }
+    } finally {
+      if (mounted) setState(() => _actioning = false);
+    }
+  }
+
+  Future<bool> _confirm(
+    BuildContext context, {
+    required String title,
+    required String body,
+  }) async =>
+      await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: Text(title),
+          content: Text(body),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.pop(ctx, false),
+                child: const Text('Cancel')),
+            FilledButton(
+                onPressed: () => Navigator.pop(ctx, true),
+                child: const Text('Confirm')),
+          ],
+        ),
+      ) ??
+      false;
+
+  Future<String?> _promptNote(
+    BuildContext context, {
+    required String title,
+    required String hint,
+  }) async {
+    final ctrl = TextEditingController();
+    final result = await showDialog<String?>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(title),
+        content: TextField(
+          controller: ctrl,
+          decoration: InputDecoration(hintText: hint),
+          maxLines: 3,
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.pop(ctx, null),
+              child: const Text('Cancel')),
+          FilledButton(
+              onPressed: () => Navigator.pop(ctx, ctrl.text.trim()),
+              child: const Text('Send')),
+        ],
+      ),
+    );
+    ctrl.dispose();
+    return result;
+  }
+
+  // ── Build ────────────────────────────────────────────────────────────────────
+
+  @override
   Widget build(BuildContext context) {
+    final statusAsync =
+        ref.watch(referralStatusProvider(widget.requestId));
+
     return Scaffold(
-      appBar: AppBar(title: const Text('Referral Status')),
-      body: Center(child: Text('Request $requestId — status tracking')),
+      appBar: AppBar(
+        title: const Text('Referral Status'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh),
+            tooltip: 'Refresh',
+            onPressed: () =>
+                ref.invalidate(referralStatusProvider(widget.requestId)),
+          ),
+        ],
+      ),
+      body: statusAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (e, _) => Center(
+          child: Padding(
+            padding: const EdgeInsets.all(24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, size: 48),
+                const SizedBox(height: 16),
+                const Text(
+                  'Unable to load request status.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 16),
+                FilledButton(
+                  onPressed: () => ref.invalidate(
+                      referralStatusProvider(widget.requestId)),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
+        ),
+        data: (data) => _buildContent(context, data),
+      ),
+    );
+  }
+
+  Widget _buildContent(
+      BuildContext context, Map<String, dynamic> data) {
+    final status = data['status'] as String? ?? 'Pending';
+    final color = _statusColor(context, status);
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(24),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Status badge
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: color.withValues(alpha: 0.3)),
+            ),
+            child: Row(
+              children: [
+                Icon(_statusIcon(status), color: color),
+                const SizedBox(width: 12),
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text('Status',
+                        style: Theme.of(context).textTheme.bodySmall),
+                    Text(
+                      status,
+                      style: Theme.of(context)
+                          .textTheme
+                          .titleMedium
+                          ?.copyWith(
+                              color: color,
+                              fontWeight: FontWeight.bold),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 16),
+          _InfoRow(label: 'Request ID', value: widget.requestId),
+          const SizedBox(height: 32),
+          Text('Actions',
+              style: Theme.of(context).textTheme.titleSmall),
+          const SizedBox(height: 12),
+          // Hop participant actions
+          _ActionCard(
+            icon: Icons.forward,
+            title: 'Forward',
+            subtitle: 'Pass to the next person in the chain.',
+            onTap: _actioning ? null : _forward,
+          ),
+          const SizedBox(height: 8),
+          _ActionCard(
+            icon: Icons.check_circle_outline,
+            title: 'Accept',
+            subtitle: 'Commit to internally referring this candidate.',
+            color: Colors.green,
+            onTap: _actioning ? null : _accept,
+          ),
+          const SizedBox(height: 8),
+          _ActionCard(
+            icon: Icons.cancel_outlined,
+            title: 'Decline',
+            subtitle: 'Decline at your hop.',
+            color: Colors.orange,
+            onTap: _actioning ? null : _decline,
+          ),
+          const Divider(height: 32),
+          // Job seeker action
+          _ActionCard(
+            icon: Icons.undo,
+            title: 'Withdraw',
+            subtitle: 'Cancel your referral request.',
+            color: Colors.red,
+            onTap: _actioning ? null : _withdraw,
+          ),
+          if (_actioning)
+            const Padding(
+              padding: EdgeInsets.only(top: 16),
+              child: Center(child: CircularProgressIndicator()),
+            ),
+        ],
+      ),
+    );
+  }
+
+  Color _statusColor(BuildContext context, String status) =>
+      switch (status.toLowerCase()) {
+        'accepted' || 'completed' => Colors.green,
+        'declined' || 'withdrawn' || 'expired' => Colors.red,
+        'forwarded' || 'active' => Colors.blue,
+        _ => Theme.of(context).colorScheme.primary,
+      };
+
+  IconData _statusIcon(String status) =>
+      switch (status.toLowerCase()) {
+        'accepted' || 'completed' => Icons.check_circle,
+        'declined' || 'withdrawn' || 'expired' => Icons.cancel,
+        'forwarded' || 'active' => Icons.forward,
+        _ => Icons.hourglass_empty,
+      };
+}
+
+// ── Helper widgets ────────────────────────────────────────────────────────────
+
+class _InfoRow extends StatelessWidget {
+  final String label;
+  final String value;
+  const _InfoRow({required this.label, required this.value});
+
+  @override
+  Widget build(BuildContext context) => Row(
+        children: [
+          Text(
+            '$label: ',
+            style: Theme.of(context)
+                .textTheme
+                .bodyMedium
+                ?.copyWith(color: Colors.grey),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              style: Theme.of(context).textTheme.bodyMedium,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+        ],
+      );
+}
+
+class _ActionCard extends StatelessWidget {
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final Color? color;
+  final VoidCallback? onTap;
+
+  const _ActionCard({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    this.color,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final c = color ?? Theme.of(context).colorScheme.primary;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: c.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(icon, color: c, size: 20),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      title,
+                      style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: onTap == null ? Colors.grey : null),
+                    ),
+                    Text(
+                      subtitle,
+                      style: Theme.of(context)
+                          .textTheme
+                          .bodySmall
+                          ?.copyWith(color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(Icons.chevron_right,
+                  color: onTap == null ? Colors.grey.shade400 : Colors.grey),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

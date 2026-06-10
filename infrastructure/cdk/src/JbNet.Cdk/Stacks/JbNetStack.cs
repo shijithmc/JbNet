@@ -172,6 +172,12 @@ public sealed class JbNetStack : Stack
             Tracing      = Tracing.ACTIVE
         });
 
+        // Function URL — HTTPS endpoint for the API Lambda (payload format v2, auth=NONE, Cognito JWT enforced in app)
+        var apiUrl = apiFunction.AddFunctionUrl(new FunctionUrlOptions
+        {
+            AuthType = FunctionUrlAuthType.NONE
+        });
+
         // ── Expiry Lambda ─────────────────────────────────────────────────────
         var expiryFunction = new Function(this, "ExpiryFunction", new FunctionProps
         {
@@ -235,5 +241,6 @@ public sealed class JbNetStack : Stack
         _ = new CfnOutput(this, "ResumeBucketName", new CfnOutputProps { Value = resumeBucket.BucketName });
         _ = new CfnOutput(this, "EventBusName",     new CfnOutputProps { Value = eventBus.EventBusName });
         _ = new CfnOutput(this, "ApiLambdaArn",     new CfnOutputProps { Value = apiFunction.FunctionArn });
+        _ = new CfnOutput(this, "ApiUrl",           new CfnOutputProps { Value = apiUrl.Url });
     }
 }
