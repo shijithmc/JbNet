@@ -2,8 +2,13 @@
 /// FA-015: email format + password complexity + required-field checks.
 library;
 
-// RFC5322-inspired pattern — permissive but catches obvious mistakes.
-final _emailRegex = RegExp(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$');
+// Hoisted to module level so each passwordValidator call does not allocate
+// four new RegExp objects on every keystroke. FA-M08.
+final _emailRegex     = RegExp(r'^[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}$');
+final _uppercaseRegex = RegExp(r'[A-Z]');
+final _lowercaseRegex = RegExp(r'[a-z]');
+final _digitRegex     = RegExp(r'[0-9]');
+final _specialRegex   = RegExp(r'[!@#\$%^&*(),.?":{}|<>_\-+=\[\]\\/]');
 
 /// Returns an error string if [value] is null/empty, otherwise null.
 String? requiredField(String? value, [String fieldName = 'This field']) {
@@ -25,13 +30,11 @@ String? passwordValidator(String? value) {
 
   final errors = <String>[];
 
-  if (value.length < 8) errors.add('at least 8 characters');
-  if (!value.contains(RegExp(r'[A-Z]'))) errors.add('an uppercase letter');
-  if (!value.contains(RegExp(r'[a-z]'))) errors.add('a lowercase letter');
-  if (!value.contains(RegExp(r'[0-9]'))) errors.add('a number');
-  if (!value.contains(RegExp(r'[!@#\$%^&*(),.?":{}|<>_\-+=\[\]\\/]'))) {
-    errors.add('a special character');
-  }
+  if (value.length < 8)                    errors.add('at least 8 characters');
+  if (!_uppercaseRegex.hasMatch(value))    errors.add('an uppercase letter');
+  if (!_lowercaseRegex.hasMatch(value))    errors.add('a lowercase letter');
+  if (!_digitRegex.hasMatch(value))        errors.add('a number');
+  if (!_specialRegex.hasMatch(value))      errors.add('a special character');
 
   if (errors.isEmpty) return null;
   return 'Password must contain ${errors.join(', ')}.';

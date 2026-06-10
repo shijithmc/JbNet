@@ -1,12 +1,12 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api_client.dart';
 import '../../../data/models/referral_dto.dart';
+import '../providers/referral_request_provider.dart';
 
-// FA-007: DTOs (ReferralPathHopDto, ReferralPathDto, DiscoverPathsResult)
-// moved to lib/data/models/referral_dto.dart — no longer defined here.
+// FA-007: DTOs moved to lib/data/models/referral_dto.dart.
+// FA-H03: referral submission delegated to ReferralRequestNotifier.
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -51,23 +51,19 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
     final path = result.paths[_selectedIndex!];
     setState(() { _submitting = true; _error = null; });
     try {
-      final dio = ref.read(apiClientProvider);
-      final response = await dio.post<Map<String, dynamic>>(
-        '/referrals',
-        data: {
-          'jobId':             widget.jobId,
-          'hopParticipantIds': path.hops.map((h) => h.userId).toList(),
-          'personalNote':      _noteCtrl.text.trim().isEmpty
-              ? null
-              : _noteCtrl.text.trim(),
-        },
-      );
-      final requestId = response.data!['requestId'] as String;
+      // FA-H03: submit via provider — no Dio in the screen.
+      final requestId = await ref
+          .read(referralRequestProvider.notifier)
+          .submit(
+            jobId:             widget.jobId,
+            hopParticipantIds: path.hops.map((h) => h.userId).toList(),
+            personalNote:      _noteCtrl.text.trim().isEmpty
+                ? null
+                : _noteCtrl.text.trim(),
+          );
       if (mounted) context.go('/referrals/$requestId');
-    } on DioException catch (e) {
-      setState(() => _error = e.response?.statusCode == 400
-          ? 'Invalid request.'
-          : 'Failed to submit. Try again.');
+    } on ReferralRequestException catch (e) {
+      setState(() => _error = e.message);
     } catch (_) {
       setState(() => _error = 'Failed to submit. Try again.');
     } finally {

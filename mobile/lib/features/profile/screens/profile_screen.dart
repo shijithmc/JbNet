@@ -1,3 +1,4 @@
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/auth_state.dart';
@@ -167,11 +168,62 @@ class _ProfileBody extends ConsumerWidget {
     );
   }
 
-  void _openResumeUpload(BuildContext context, WidgetRef ref) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Resume upload — pick a PDF from your device.')),
+  Future<void> _openResumeUpload(BuildContext context, WidgetRef ref) async {
+    // Step 1 — let user pick a PDF.
+    final result = await FilePicker.platform.pickFiles(
+      type:             FileType.custom,
+      allowedExtensions: const ['pdf'],
+      allowMultiple:    false,
     );
-    // TODO(resume): integrate file_picker + S3 presigned upload (FA-007 follow-up)
+    if (result == null || result.files.isEmpty) return;
+
+    final picked = result.files.first;
+    if (picked.path == null) {
+      if (context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not access the selected file.')),
+        );
+      }
+      return;
+    }
+
+    // Step 2 — show loading overlay while uploading.
+    if (!context.mounted) return;
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            CircularProgressIndicator(),
+            SizedBox(width: 20),
+            Text('Uploading resume…'),
+          ],
+        ),
+      ),
+    );
+
+    // Step 3 — upload: presign → S3 PUT (handled by the provider).
+    try {
+      await ref.read(profileProvider.notifier).uploadResume(
+        filePath: picked.path!,
+        fileName: picked.name,
+      );
+      if (context.mounted) {
+        Navigator.of(context).pop(); // dismiss loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Resume uploaded successfully.')),
+        );
+      }
+    } on ResumeUploadException catch (e) {
+      if (context.mounted) {
+        Navigator.of(context).pop(); // dismiss loading dialog
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message)),
+        );
+      }
+    }
   }
 }
 

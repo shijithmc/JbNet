@@ -1,12 +1,14 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api_client.dart';
+import '../../../core/auth_state.dart';
 import '../../../data/models/referral_dto.dart';
+import '../providers/referral_actions_provider.dart';
 
-// FA-016: provider now returns typed [ReferralStatusDto] instead of
-// Map<String, dynamic> — runtime crash on missing keys eliminated.
+// FA-016: provider returns typed [ReferralStatusDto].
+// FA-H04: forward/accept/decline/withdraw delegated to ReferralActionsNotifier.
+// FA-M04: actions gated on user role (requester sees Withdraw; others see Forward/Accept/Decline).
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -37,7 +39,7 @@ class _ReferralStatusScreenState
     extends ConsumerState<ReferralStatusScreen> {
   bool _actioning = false;
 
-  // ── Actions ─────────────────────────────────────────────────────────────────
+  // ── Actions — FA-H04: delegated to ReferralActionsNotifier ──────────────────
 
   Future<void> _forward() async {
     final note = await _promptNote(
@@ -47,13 +49,10 @@ class _ReferralStatusScreenState
     );
     if (note == null) return; // user cancelled
     await _doAction(
-      () async {
-        final dio = ref.read(apiClientProvider);
-        await dio.post<dynamic>(
-          '/referrals/${widget.requestId}/forward',
-          data: {'note': note.isEmpty ? null : note},
-        );
-      },
+      () => ref.read(referralActionsProvider.notifier).forward(
+            requestId: widget.requestId,
+            note: note.isEmpty ? null : note,
+          ),
       successMessage: 'Request forwarded.',
     );
   }
@@ -66,10 +65,9 @@ class _ReferralStatusScreenState
     );
     if (!confirmed) return;
     await _doAction(
-      () async {
-        final dio = ref.read(apiClientProvider);
-        await dio.post<dynamic>('/referrals/${widget.requestId}/accept');
-      },
+      () => ref
+          .read(referralActionsProvider.notifier)
+          .accept(requestId: widget.requestId),
       successMessage: 'Request accepted.',
     );
   }
@@ -78,18 +76,13 @@ class _ReferralStatusScreenState
     final confirmed = await _confirm(
       context,
       title: 'Decline referral request?',
-      body:
-          'The job seeker will be notified that you cannot help with this request.',
+      body: 'The job seeker will be notified you cannot help with this request.',
     );
     if (!confirmed) return;
     await _doAction(
-      () async {
-        final dio = ref.read(apiClientProvider);
-        await dio.post<dynamic>(
-          '/referrals/${widget.requestId}/decline',
-          data: {'reason': null},
-        );
-      },
+      () => ref
+          .read(referralActionsProvider.notifier)
+          .decline(requestId: widget.requestId),
       successMessage: 'Request declined.',
     );
   }
@@ -102,18 +95,20 @@ class _ReferralStatusScreenState
     );
     if (!confirmed) return;
     await _doAction(
-      () async {
-        final dio = ref.read(apiClientProvider);
-        await dio.delete<dynamic>('/referrals/${widget.requestId}');
-      },
+      () => ref
+          .read(referralActionsProvider.notifier)
+          .withdraw(requestId: widget.requestId),
       successMessage: 'Request withdrawn.',
+      afterAction: () {
+        if (mounted) context.go('/jobs');
+      },
     );
-    if (mounted) context.go('/jobs');
   }
 
   Future<void> _doAction(
     Future<void> Function() fn, {
     required String successMessage,
+    VoidCallback? afterAction,
   }) async {
     setState(() => _actioning = true);
     try {
@@ -122,14 +117,12 @@ class _ReferralStatusScreenState
         ref.invalidate(referralStatusProvider(widget.requestId));
         ScaffoldMessenger.of(context)
             .showSnackBar(SnackBar(content: Text(successMessage)));
+        afterAction?.call();
       }
-    } on DioException catch (e) {
+    } on ReferralActionException catch (e) {
       if (mounted) {
-        final msg = e.response?.statusCode == 403
-            ? 'Not authorised for this action.'
-            : 'Action failed. Please try again.';
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg)));
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _actioning = false);
@@ -239,6 +232,17 @@ class _ReferralStatusScreenState
     final status = dto.status;
     final color  = _statusColor(context, status);
 
+    // FA-M04: gate actions on the authenticated user's role.
+    // requesterId = the job seeker who sent the referral.
+    // If currentUserId matches requesterId → show only Withdraw.
+    // Otherwise → show intermediary actions (Forward / Accept / Decline).
+    final currentUserId = ref.read(authStateProvider).userId;
+    final isRequester   = currentUserId != null && currentUserId == dto.requesterId;
+
+    // Determine whether the current status still allows actions.
+    final isTerminal = {'accepted', 'declined', 'withdrawn', 'expired', 'completed'}
+        .contains(status.toLowerCase());
+
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
       child: Column(
@@ -246,8 +250,7 @@ class _ReferralStatusScreenState
         children: [
           // Status badge
           Container(
-            padding:
-                const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
               color: color.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(12),
@@ -268,8 +271,7 @@ class _ReferralStatusScreenState
                           .textTheme
                           .titleMedium
                           ?.copyWith(
-                              color: color,
-                              fontWeight: FontWeight.bold),
+                              color: color, fontWeight: FontWeight.bold),
                     ),
                   ],
                 ),
@@ -277,48 +279,55 @@ class _ReferralStatusScreenState
             ),
           ),
           const SizedBox(height: 16),
+          _InfoRow(label: 'For', value: '${dto.jobTitle} · ${dto.companyName}'),
           _InfoRow(label: 'Request ID', value: widget.requestId),
           const SizedBox(height: 32),
-          Text('Actions',
-              style: Theme.of(context).textTheme.titleSmall),
-          const SizedBox(height: 12),
-          // Hop participant actions
-          _ActionCard(
-            icon: Icons.forward,
-            title: 'Forward',
-            subtitle: 'Pass to the next person in the chain.',
-            onTap: _actioning ? null : _forward,
-          ),
-          const SizedBox(height: 8),
-          _ActionCard(
-            icon: Icons.check_circle_outline,
-            title: 'Accept',
-            subtitle: 'Commit to internally referring this candidate.',
-            color: Colors.green,
-            onTap: _actioning ? null : _accept,
-          ),
-          const SizedBox(height: 8),
-          _ActionCard(
-            icon: Icons.cancel_outlined,
-            title: 'Decline',
-            subtitle: 'Decline at your hop.',
-            color: Colors.orange,
-            onTap: _actioning ? null : _decline,
-          ),
-          const Divider(height: 32),
-          // Job seeker action
-          _ActionCard(
-            icon: Icons.undo,
-            title: 'Withdraw',
-            subtitle: 'Cancel your referral request.',
-            color: Colors.red,
-            onTap: _actioning ? null : _withdraw,
-          ),
-          if (_actioning)
-            const Padding(
-              padding: EdgeInsets.only(top: 16),
-              child: Center(child: CircularProgressIndicator()),
-            ),
+
+          if (!isTerminal) ...[
+            Text('Actions', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: 12),
+
+            if (isRequester) ...[
+              // Job seeker: can only withdraw their own request.
+              _ActionCard(
+                icon: Icons.undo,
+                title: 'Withdraw',
+                subtitle: 'Cancel your referral request.',
+                color: Colors.red,
+                onTap: _actioning ? null : _withdraw,
+              ),
+            ] else ...[
+              // Intermediary / referrer: forward, accept, or decline.
+              _ActionCard(
+                icon: Icons.forward,
+                title: 'Forward',
+                subtitle: 'Pass to the next person in the chain.',
+                onTap: _actioning ? null : _forward,
+              ),
+              const SizedBox(height: 8),
+              _ActionCard(
+                icon: Icons.check_circle_outline,
+                title: 'Accept',
+                subtitle: 'Commit to internally referring this candidate.',
+                color: Colors.green,
+                onTap: _actioning ? null : _accept,
+              ),
+              const SizedBox(height: 8),
+              _ActionCard(
+                icon: Icons.cancel_outlined,
+                title: 'Decline',
+                subtitle: 'Decline at your hop.',
+                color: Colors.orange,
+                onTap: _actioning ? null : _decline,
+              ),
+            ],
+
+            if (_actioning)
+              const Padding(
+                padding: EdgeInsets.only(top: 16),
+                child: Center(child: CircularProgressIndicator()),
+              ),
+          ],
         ],
       ),
     );
