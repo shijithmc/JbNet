@@ -4,6 +4,7 @@ import 'package:go_router/go_router.dart';
 import '../../../core/auth_exception.dart';
 import '../../../core/auth_state.dart';
 import '../../../core/cognito_service.dart';
+import '../../../core/validators.dart';
 
 // FA-012: No `amazon_cognito_identity_dart_2` import — screens depend only
 // on the domain AuthException hierarchy.
@@ -119,8 +120,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             decoration: const InputDecoration(labelText: 'Full name'),
             textCapitalization: TextCapitalization.words,
             textInputAction: TextInputAction.next,
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Full name required.' : null,
+            validator: (v) => requiredField(v, 'Full name'),
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -129,11 +129,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             keyboardType: TextInputType.emailAddress,
             autocorrect: false,
             textInputAction: TextInputAction.next,
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Email required.';
-              if (!v.contains('@'))       return 'Enter a valid email.';
-              return null;
-            },
+            validator: emailValidator,
           ),
           const SizedBox(height: 16),
           TextFormField(
@@ -145,8 +141,7 @@ class _RegisterScreenState extends ConsumerState<RegisterScreen> {
             obscureText: true,
             textInputAction: TextInputAction.done,
             onFieldSubmitted: (_) => _signUp(),
-            validator: (v) =>
-                (v == null || v.length < 8) ? 'Min 8 characters.' : null,
+            validator: passwordValidator,
           ),
           if (_error != null) ...[
             const SizedBox(height: 12),

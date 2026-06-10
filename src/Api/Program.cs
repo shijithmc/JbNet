@@ -66,3 +66,6 @@ app.MapHealthChecks("/healthz");
 app.MapControllers();
 
 app.Run();
+
+// Expose Program to WebApplicationFactory in test projects
+public partial class Program { }
