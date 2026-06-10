@@ -1,5 +1,13 @@
+import 'dart:io';
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api_client.dart';
+
+/// Thrown when the resume upload flow fails (picking → presigning → S3 PUT).
+class ResumeUploadException implements Exception {
+  final String message;
+  const ResumeUploadException(this.message);
+}
 
 /// Lightweight client-side model for the authenticated user's profile.
 class UserProfile {
@@ -112,6 +120,68 @@ class ProfileNotifier extends AutoDisposeAsyncNotifier<UserProfile> {
       'sizeBytes': sizeBytes,
     });
     return response.data!['uploadUrl'] as String;
+  }
+
+  /// Picks a PDF from [filePath], requests a presigned S3 URL, and PUTs the
+  /// file bytes directly to S3. On success, updates [hasResume] optimistically.
+  ///
+  /// Uses a separate no-auth [Dio] instance for the S3 PUT — presigned URLs
+  /// include auth in the query string and reject the `Authorization` header.
+  Future<void> uploadResume({
+    required String filePath,
+    required String fileName,
+  }) async {
+    final file = File(filePath);
+    final int sizeBytes;
+    try {
+      sizeBytes = await file.length();
+    } catch (_) {
+      throw const ResumeUploadException('Could not read the selected file.');
+    }
+
+    // Step 1 — request presigned URL from our backend.
+    final String uploadUrl;
+    try {
+      uploadUrl = await requestResumeUpload(
+        fileName:  fileName,
+        sizeBytes: sizeBytes,
+      );
+    } on DioException catch (e) {
+      throw ResumeUploadException(switch (e.response?.statusCode) {
+        413 => 'File is too large. Maximum size is 5 MB.',
+        400 => 'Invalid file. Please upload a PDF.',
+        _   => 'Upload failed. Please try again.',
+      });
+    }
+
+    // Step 2 — PUT directly to S3 presigned URL.
+    // Intentionally NO auth interceptor: S3 presigned URLs embed credentials
+    // in the query string and reject any Authorization header.
+    final s3Dio = Dio(BaseOptions(
+      connectTimeout: const Duration(seconds: 10),
+      receiveTimeout: const Duration(seconds: 60),
+    ));
+    try {
+      await s3Dio.put<void>(
+        uploadUrl,
+        data:    file.openRead(),
+        options: Options(
+          headers: {
+            'Content-Type':   'application/pdf',
+            Headers.contentLengthHeader: sizeBytes,
+          },
+          validateStatus: (status) => status == 200,
+        ),
+      );
+    } on DioException {
+      throw const ResumeUploadException('Upload to S3 failed. Please try again.');
+    }
+
+    // Step 3 — optimistically mark resume present, then re-fetch.
+    if (state.hasValue) {
+      state = AsyncValue.data(state.value!.copyWith(hasResume: true));
+    }
+    ref.invalidateSelf();
   }
 }
 

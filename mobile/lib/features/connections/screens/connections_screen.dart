@@ -1,7 +1,5 @@
-import 'package:dio/dio.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import '../../../core/api_client.dart';
 import '../providers/connections_provider.dart';
 
 /// Lists the authenticated user's accepted connections and provides actions to
@@ -91,28 +89,20 @@ class _ConnectionsScreenState extends ConsumerState<ConnectionsScreen> {
 
     setState(() => _busy = true);
     try {
-      final dio = ref.read(apiClientProvider);
-      await dio.post<dynamic>('/connections', data: {
-        'targetUserId': targetId,
-        'note':         note.isEmpty ? null : note,
-      });
+      // FA-H02: action delegated to ConnectionsNotifier — no Dio in the screen.
+      await ref.read(connectionsProvider.notifier).sendConnectionRequest(
+        targetUserId: targetId,
+        note:         note.isEmpty ? null : note,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Connection request sent.')),
         );
-        // Refresh list — the new connection is still Pending so won't appear yet,
-        // but it triggers a reload for consistency.
-        ref.read(connectionsProvider.notifier).refresh();
       }
-    } on DioException catch (e) {
+    } on ConnectionException catch (e) {
       if (mounted) {
-        final msg = e.response?.statusCode == 409
-            ? 'Connection request already sent.'
-            : e.response?.statusCode == 404
-                ? 'User not found.'
-                : 'Failed to send request. Try again.';
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg)));
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);
@@ -180,22 +170,19 @@ class _ConnectionsScreenState extends ConsumerState<ConnectionsScreen> {
 
     setState(() => _busy = true);
     try {
-      final dio = ref.read(apiClientProvider);
-      await dio.post<dynamic>('/connections/$requesterId/accept');
+      // FA-H02: action delegated to ConnectionsNotifier — no Dio in the screen.
+      await ref.read(connectionsProvider.notifier).acceptConnectionRequest(
+        requesterId: requesterId,
+      );
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           const SnackBar(content: Text('Connection accepted.')),
         );
-        // New accepted connection — refresh list so it appears immediately.
-        ref.read(connectionsProvider.notifier).refresh();
       }
-    } on DioException catch (e) {
+    } on ConnectionException catch (e) {
       if (mounted) {
-        final msg = e.response?.statusCode == 404
-            ? 'Request not found.'
-            : 'Failed to accept. Try again.';
         ScaffoldMessenger.of(context)
-            .showSnackBar(SnackBar(content: Text(msg)));
+            .showSnackBar(SnackBar(content: Text(e.message)));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

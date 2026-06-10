@@ -1,3 +1,4 @@
+import 'package:dio/dio.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api_client.dart';
 
@@ -21,7 +22,17 @@ class ConnectionSummary {
       );
 }
 
-/// Fetches the authenticated user's accepted connections from the API.
+/// Typed error for connection-action API failures. FA-H02.
+class ConnectionException implements Exception {
+  final String message;
+  const ConnectionException(this.message);
+  @override
+  String toString() => message;
+}
+
+/// Fetches the authenticated user's accepted connections and provides
+/// actions for sending and accepting connection requests.
+/// FA-H02: direct Dio calls removed from the screen; all networking lives here.
 class ConnectionsNotifier
     extends AutoDisposeAsyncNotifier<List<ConnectionSummary>> {
   @override
@@ -34,6 +45,43 @@ class ConnectionsNotifier
         .cast<Map<String, dynamic>>()
         .map(ConnectionSummary.fromJson)
         .toList();
+  }
+
+  /// Sends a connection request to [targetUserId].
+  /// Throws [ConnectionException] on known API errors.
+  Future<void> sendConnectionRequest({
+    required String targetUserId,
+    String? note,
+  }) async {
+    final dio = ref.read(apiClientProvider);
+    try {
+      await dio.post<dynamic>('/connections', data: {
+        'targetUserId': targetUserId,
+        if (note != null && note.isNotEmpty) 'note': note,
+      });
+      ref.invalidateSelf(); // refresh list
+    } on DioException catch (e) {
+      throw ConnectionException(switch (e.response?.statusCode) {
+        409 => 'Connection request already sent.',
+        404 => 'User not found.',
+        _   => 'Failed to send request. Try again.',
+      });
+    }
+  }
+
+  /// Accepts a pending connection request from [requesterId].
+  /// Throws [ConnectionException] on known API errors.
+  Future<void> acceptConnectionRequest({required String requesterId}) async {
+    final dio = ref.read(apiClientProvider);
+    try {
+      await dio.post<dynamic>('/connections/$requesterId/accept');
+      ref.invalidateSelf(); // accepted connection now appears in list
+    } on DioException catch (e) {
+      throw ConnectionException(switch (e.response?.statusCode) {
+        404 => 'Request not found.',
+        _   => 'Failed to accept. Try again.',
+      });
+    }
   }
 
   /// Re-loads the list from the server.
