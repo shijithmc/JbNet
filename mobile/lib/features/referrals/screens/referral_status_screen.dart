@@ -3,18 +3,23 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api_client.dart';
+import '../../../data/models/referral_dto.dart';
+
+// FA-016: provider now returns typed [ReferralStatusDto] instead of
+// Map<String, dynamic> — runtime crash on missing keys eliminated.
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
 // GET /referrals/{id} currently returns a placeholder { id } response.
 // The full status shape (status, jobTitle, companyName, hops, role) will be
 // populated once the backend query is implemented.
+// ReferralStatusDto.fromJson uses null-coalescing defaults for all fields.
 final referralStatusProvider =
-    FutureProvider.family<Map<String, dynamic>, String>((ref, requestId) async {
+    FutureProvider.family<ReferralStatusDto, String>((ref, requestId) async {
   final dio = ref.watch(apiClientProvider);
   final response =
       await dio.get<Map<String, dynamic>>('/referrals/$requestId');
-  return response.data!;
+  return ReferralStatusDto.fromJson(response.data!);
 });
 
 // ── Screen ────────────────────────────────────────────────────────────────────
@@ -225,15 +230,14 @@ class _ReferralStatusScreenState
             ),
           ),
         ),
-        data: (data) => _buildContent(context, data),
+        data: (dto) => _buildContent(context, dto),
       ),
     );
   }
 
-  Widget _buildContent(
-      BuildContext context, Map<String, dynamic> data) {
-    final status = data['status'] as String? ?? 'Pending';
-    final color = _statusColor(context, status);
+  Widget _buildContent(BuildContext context, ReferralStatusDto dto) {
+    final status = dto.status;
+    final color  = _statusColor(context, status);
 
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),

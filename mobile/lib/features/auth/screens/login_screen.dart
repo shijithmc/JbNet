@@ -1,8 +1,11 @@
-import 'package:amazon_cognito_identity_dart_2/cognito.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/auth_exception.dart';
 import '../../../core/auth_state.dart';
+
+// FA-012: No `amazon_cognito_identity_dart_2` import — screens depend only
+// on the domain AuthException hierarchy, not on the Cognito infrastructure.
 
 class LoginScreen extends ConsumerStatefulWidget {
   const LoginScreen({super.key});
@@ -35,22 +38,14 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
         _passwordCtrl.text,
       );
       // GoRouter redirect fires on state change → navigates to /jobs automatically
-    } on CognitoClientException catch (e) {
-      setState(() => _error = _friendlyError(e.code));
+    } on AuthException catch (e) {
+      setState(() => _error = e.message);
     } catch (_) {
       setState(() => _error = 'An unexpected error occurred. Please try again.');
     } finally {
       if (mounted) setState(() => _loading = false);
     }
   }
-
-  String _friendlyError(String? code) => switch (code) {
-    'NotAuthorizedException'        => 'Incorrect email or password.',
-    'UserNotFoundException'         => 'No account found with that email.',
-    'UserNotConfirmedException'     => 'Please verify your email address first.',
-    'PasswordResetRequiredException'=> 'Password reset required. Check your email.',
-    _                               => 'Sign-in failed. Please try again.',
-  };
 
   @override
   Widget build(BuildContext context) {
@@ -67,7 +62,8 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                 const Spacer(),
                 Text(
                   'JbNet',
-                  style: theme.textTheme.displaySmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.displaySmall?.copyWith(
+                      fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 8),
                 Text('Your referral network', style: theme.textTheme.bodyLarge),
@@ -80,7 +76,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   autocorrect: false,
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Email is required.';
-                    if (!v.contains('@')) return 'Enter a valid email address.';
+                    if (!v.contains('@'))       return 'Enter a valid email address.';
                     return null;
                   },
                 ),
@@ -91,11 +87,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   obscureText: true,
                   textInputAction: TextInputAction.done,
                   onFieldSubmitted: (_) => _submit(),
-                  validator: (v) => (v == null || v.length < 8) ? 'Min 8 characters.' : null,
+                  validator: (v) =>
+                      (v == null || v.length < 8) ? 'Min 8 characters.' : null,
                 ),
                 if (_error != null) ...[
                   const SizedBox(height: 12),
-                  Text(_error!, style: TextStyle(color: theme.colorScheme.error)),
+                  Text(_error!,
+                      style: TextStyle(color: theme.colorScheme.error)),
                 ],
                 const SizedBox(height: 24),
                 FilledButton(

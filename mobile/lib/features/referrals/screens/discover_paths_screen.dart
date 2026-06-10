@@ -3,71 +3,10 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../../../core/api_client.dart';
+import '../../../data/models/referral_dto.dart';
 
-// ── DTOs ─────────────────────────────────────────────────────────────────────
-
-class ReferralPathHopDto {
-  final String userId;
-  final String fullName;
-  final String headline;
-  final String employerName;
-  final bool isAtTargetCompany;
-
-  const ReferralPathHopDto({
-    required this.userId,
-    required this.fullName,
-    required this.headline,
-    required this.employerName,
-    required this.isAtTargetCompany,
-  });
-
-  factory ReferralPathHopDto.fromJson(Map<String, dynamic> j) =>
-      ReferralPathHopDto(
-        userId: j['userId'] as String,
-        fullName: j['fullName'] as String,
-        headline: j['headline'] as String,
-        employerName: j['employerName'] as String,
-        isAtTargetCompany: j['isAtTargetCompany'] as bool,
-      );
-}
-
-class ReferralPathDto {
-  final int totalHops;
-  final List<ReferralPathHopDto> hops;
-
-  const ReferralPathDto({required this.totalHops, required this.hops});
-
-  factory ReferralPathDto.fromJson(Map<String, dynamic> j) => ReferralPathDto(
-        totalHops: j['totalHops'] as int,
-        hops: (j['hops'] as List<dynamic>)
-            .map((h) => ReferralPathHopDto.fromJson(h as Map<String, dynamic>))
-            .toList(),
-      );
-}
-
-class DiscoverPathsResult {
-  final String jobId;
-  final String companyName;
-  final String jobTitle;
-  final List<ReferralPathDto> paths;
-
-  const DiscoverPathsResult({
-    required this.jobId,
-    required this.companyName,
-    required this.jobTitle,
-    required this.paths,
-  });
-
-  factory DiscoverPathsResult.fromJson(Map<String, dynamic> j) =>
-      DiscoverPathsResult(
-        jobId: j['jobId'] as String,
-        companyName: j['companyName'] as String,
-        jobTitle: j['jobTitle'] as String,
-        paths: (j['paths'] as List<dynamic>)
-            .map((p) => ReferralPathDto.fromJson(p as Map<String, dynamic>))
-            .toList(),
-      );
-}
+// FA-007: DTOs (ReferralPathHopDto, ReferralPathDto, DiscoverPathsResult)
+// moved to lib/data/models/referral_dto.dart — no longer defined here.
 
 // ── Provider ──────────────────────────────────────────────────────────────────
 
@@ -110,18 +49,15 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
       return;
     }
     final path = result.paths[_selectedIndex!];
-    setState(() {
-      _submitting = true;
-      _error = null;
-    });
+    setState(() { _submitting = true; _error = null; });
     try {
       final dio = ref.read(apiClientProvider);
       final response = await dio.post<Map<String, dynamic>>(
         '/referrals',
         data: {
-          'jobId': widget.jobId,
+          'jobId':             widget.jobId,
           'hopParticipantIds': path.hops.map((h) => h.userId).toList(),
-          'personalNote': _noteCtrl.text.trim().isEmpty
+          'personalNote':      _noteCtrl.text.trim().isEmpty
               ? null
               : _noteCtrl.text.trim(),
         },
@@ -203,16 +139,20 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Text(result.jobTitle,
-                  style: Theme.of(context)
-                      .textTheme
-                      .titleMedium
-                      ?.copyWith(fontWeight: FontWeight.bold)),
-              Text(result.companyName,
-                  style: Theme.of(context)
-                      .textTheme
-                      .bodyMedium
-                      ?.copyWith(color: Colors.grey)),
+              Text(
+                result.jobTitle,
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
+                    ?.copyWith(fontWeight: FontWeight.bold),
+              ),
+              Text(
+                result.companyName,
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyMedium
+                    ?.copyWith(color: Colors.grey),
+              ),
               const SizedBox(height: 4),
               Text(
                 '${result.paths.length} path${result.paths.length == 1 ? '' : 's'} found',
@@ -242,7 +182,7 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
   Widget _buildPathCard(
       BuildContext context, ReferralPathDto path, int index) {
     final isSelected = _selectedIndex == index;
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary    = Theme.of(context).colorScheme.primary;
 
     return GestureDetector(
       onTap: () => setState(() => _selectedIndex = index),
@@ -254,9 +194,7 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
             width: isSelected ? 2 : 1,
           ),
           borderRadius: BorderRadius.circular(12),
-          color: isSelected
-              ? primary.withValues(alpha: 0.06)
-              : null,
+          color: isSelected ? primary.withValues(alpha: 0.06) : null,
         ),
         padding: const EdgeInsets.all(12),
         child: Column(
@@ -285,14 +223,14 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
               scrollDirection: Axis.horizontal,
               child: Row(
                 children: path.hops.asMap().entries.expand((entry) {
-                  final i = entry.key;
+                  final i   = entry.key;
                   final hop = entry.value;
                   return [
                     if (i > 0)
                       const Padding(
                         padding: EdgeInsets.symmetric(horizontal: 8),
-                        child: Icon(Icons.arrow_forward,
-                            size: 16, color: Colors.grey),
+                        child: Icon(
+                            Icons.arrow_forward, size: 16, color: Colors.grey),
                       ),
                     _HopChip(hop: hop),
                   ];
@@ -324,13 +262,13 @@ class _DiscoverPathsScreenState extends ConsumerState<DiscoverPathsScreen> {
         if (_error != null) ...[
           const SizedBox(height: 8),
           Text(_error!,
-              style:
-                  TextStyle(color: Theme.of(context).colorScheme.error)),
+              style: TextStyle(color: Theme.of(context).colorScheme.error)),
         ],
         const SizedBox(height: 16),
         FilledButton(
-          onPressed:
-              (_submitting || _selectedIndex == null) ? null : () => _submit(result),
+          onPressed: (_submitting || _selectedIndex == null)
+              ? null
+              : () => _submit(result),
           child: _submitting
               ? const SizedBox.square(
                   dimension: 20,
@@ -351,7 +289,7 @@ class _HopChip extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final primary = Theme.of(context).colorScheme.primary;
+    final primary   = Theme.of(context).colorScheme.primary;
     final secondary = Theme.of(context).colorScheme.secondary;
     return SizedBox(
       width: 72,
@@ -362,9 +300,7 @@ class _HopChip extends StatelessWidget {
             radius: 22,
             backgroundColor: hop.isAtTargetCompany ? primary : secondary,
             child: Text(
-              hop.fullName.isNotEmpty
-                  ? hop.fullName[0].toUpperCase()
-                  : '?',
+              hop.fullName.isNotEmpty ? hop.fullName[0].toUpperCase() : '?',
               style: const TextStyle(color: Colors.white, fontSize: 16),
             ),
           ),
@@ -377,8 +313,7 @@ class _HopChip extends StatelessWidget {
           ),
           Text(
             hop.employerName,
-            style:
-                TextStyle(fontSize: 10, color: Colors.grey.shade600),
+            style: TextStyle(fontSize: 10, color: Colors.grey.shade600),
             overflow: TextOverflow.ellipsis,
             textAlign: TextAlign.center,
           ),

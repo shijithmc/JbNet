@@ -19,6 +19,33 @@ android {
         jvmTarget = JavaVersion.VERSION_17.toString()
     }
 
+    // FA-002: Release signing via CI environment variables.
+    // Set these four GitHub encrypted secrets before submitting to the Play Store:
+    //   KEYSTORE_PATH             — path to the .jks file (uploaded as a secret file)
+    //   KEYSTORE_STORE_PASSWORD   — store password
+    //   KEYSTORE_KEY_ALIAS        — key alias
+    //   KEYSTORE_KEY_PASSWORD     — key password
+    //
+    // Local dev (no env vars): falls back to the debug keystore so that
+    // `flutter run --release` still works on a developer machine.
+    signingConfigs {
+        create("release") {
+            val ksPath = System.getenv("KEYSTORE_PATH")
+            if (!ksPath.isNullOrEmpty()) {
+                storeFile = file(ksPath)
+                storePassword = System.getenv("KEYSTORE_STORE_PASSWORD") ?: ""
+                keyAlias = System.getenv("KEYSTORE_KEY_ALIAS") ?: ""
+                keyPassword = System.getenv("KEYSTORE_KEY_PASSWORD") ?: ""
+            } else {
+                // Developer fallback — NOT used for Play Store builds.
+                storeFile = signingConfigs.getByName("debug").storeFile
+                storePassword = signingConfigs.getByName("debug").storePassword
+                keyAlias = signingConfigs.getByName("debug").keyAlias
+                keyPassword = signingConfigs.getByName("debug").keyPassword
+            }
+        }
+    }
+
     defaultConfig {
         // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
         applicationId = "com.jbnet.jbnet"
@@ -32,9 +59,7 @@ android {
 
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }
